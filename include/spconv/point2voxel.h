@@ -96,8 +96,8 @@ int points_to_voxel_3d_np(py::array_t<DType> points, py::array_t<DType> voxels,
 
 template <typename DType, int NDim>
 int points_to_voxel_3d_np_mean(
-    py::array_t<DType> points, py::array_t<DType> voxel_point_mask,
-    py::array_t<DType> voxels, py::array_t<DType> means, py::array_t<int> coors,
+    py::array_t<DType> points, py::array_t<DType> voxels,
+    py::array_t<DType> voxel_point_mask, py::array_t<DType> means, py::array_t<int> coors,
     py::array_t<int> num_points_per_voxel, py::array_t<int> coor_to_voxelidx,
     std::vector<DType> voxel_size, std::vector<DType> coors_range,
     int max_points, int max_voxels) {
