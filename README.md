@@ -1,46 +1,113 @@
 # SpConv: PyTorch Spatially Sparse Convolution Library
 
-[![Build Status](https://github.com/traveller59/spconv/workflows/build/badge.svg)](https://github.com/traveller59/spconv/actions?query=workflow%3Abuild)
+Some comments about the usage of the library. The original README is in [README_original.md](./README_original.md). Also check it!
 
-This is a spatially sparse convolution library like [SparseConvNet](https://github.com/facebookresearch/SparseConvNet) but faster and easy to read. This library provide sparse convolution/transposed, submanifold convolution, inverse convolution and sparse maxpool.
+### Installation Notes
+- The CUDA path is hard-coded so it's better to first `ln` `/usr/local/cuda` to the correct version of CUDA if multiple CUDA is used. Ref: [https://github.com/traveller59/spconv/issues/78](https://github.com/traveller59/spconv/issues/78)
 
+### Difference between [https://github.com/traveller59/spconv](https://github.com/traveller59/spconv)
 
-2020-5-2, we add ConcatTable, JoinTable, AddTable, and Identity function to build ResNet and Unet in this version of spconv.
+- fix bug in `points_to_voxel_3d_np_mean` according to [https://github.com/traveller59/spconv/issues/135][https://github.com/traveller59/spconv/issues/135]
+- set `full_mean` in `VoxelGenerator` to be `False` in default otherwise there will be assertion error.
 
-
-## Docker:
-
-```docker pull scrin/dev-spconv```, contains python 3.8, cuda 10.1, fish shell, newest pytorch and tensorflow.
-
-## Install on Ubuntu 16.04/18.04
-
-* if you are using pytorch 1.4+ and encounter "nvcc fatal: unknown -Wall", you need to go to torch package dir and remove flags contains "-Wall" in INTERFACE_COMPILE_OPTIONS in Caffe2Targets.cmake. This problem can't be fixed in this project (to avoid this, I need to remove all torch dependency in cuda sources and drop half support).
-
-0. Use ```git clone xxx.git --recursive``` to clone this repo.
-
-1. Install boost headers to your system include path, you can use either ```sudo apt-get install libboost-all-dev``` or download compressed files from boost official website and copy headers to include path.
-
-2. Download cmake >= 3.13.2, then add cmake executables to PATH.
-
-3. Ensure you have installed pytorch 1.0+ in your environment, run ```python setup.py bdist_wheel``` (don't use ```python setup.py install```).
-
-4. Run ```cd ./dist```, use pip to install generated whl file.
-
-## Install on Windows 10 (Not supported for now)
-
-## Compare with SparseConvNet
-
-### Features
-
-* SparseConvNet's Sparse Convolution don't support padding and dilation, spconv support this.
-
-* spconv only contains sparse convolutions, the batchnorm and activations can directly use layers from torch.nn, SparseConvNet contains lots of their own implementation of layers such as batchnorm and activations.
-
-### Speed
-
-* spconv is faster than SparseConvNet due to gpu indice generation and gather-gemm-scatter algorithm. SparseConvNet use hand-written gemm which is slow.
+These two do not affect actually since we should use `VoxelGeneratorV2` and set `full_mean=False`
 
 ## Usage
+
+### Utils
+- DO NOT use `VoxelGenerator` since there seem to be bugs in this function. USE `VoxelGeneratorV2` instead.
+
+An example to check:
+```
+import spconv
+import torch
+anchor_center = np.random.rand(4, 3)
+# USE THE DEFAULT VALUE SO THAT: `full_mean=False` and `block_filtering=False` (i.e. do not filter out any points)
+voxel_generator = spconv.utils.VoxelGeneratorV2(voxel_size=[0.5] * 3,
+                                                point_cloud_range=[0, 0, 0, 1, 1, 1],
+                                                max_num_points=4,
+                                                max_voxels=800000)
+res = voxel_generator.generate(anchor_center)
+for k, v in res.items():
+    print('-' * 30)
+    print(k)
+    print(v)
+
+---------------------------------------------------------
+
+In []: anchor_center
+Out[]: 
+array([[0.6637, 0.0214, 0.7978],
+       [0.5229, 0.3244, 0.5621],
+       [0.3089, 0.668 , 0.805 ],
+       [0.5843, 0.5398, 0.7831]])
+
+Output>>
+------------------------------
+voxels # input anchor_center is of shape (4, 3), so voxels will be (4, max_num_points, 3)
+[[[0.6637 0.0214 0.7978]
+  [0.5229 0.3244 0.5621]
+  [0.     0.     0.    ]
+  [0.     0.     0.    ]]
+
+ [[0.3089 0.668  0.805 ]
+  [0.     0.     0.    ]
+  [0.     0.     0.    ]
+  [0.     0.     0.    ]]
+
+ [[0.5843 0.5398 0.7831]
+  [0.     0.     0.    ]
+  [0.     0.     0.    ]
+  [0.     0.     0.    ]]]
+------------------------------
+coordinates # with the same shape[0] as voxels, int32 tensor. NOTE: **zyx** format!!!!
+[[1 0 1]
+ [1 1 0]
+ [1 1 1]]
+------------------------------
+num_points_per_voxel
+[2 1 1]
+------------------------------
+voxel_point_mask
+[[[1.]
+  [1.]
+  [0.]
+  [0.]]
+
+ [[1.]
+  [0.]
+  [0.]
+  [0.]]
+
+ [[1.]
+  [0.]
+  [0.]
+  [0.]]]
+------------------------------
+voxel_num
+3
+
+
+
+```
+
+### Convolution
+
+- `SparseConv2d` is `SC` in the original paper `3D Semantic Segmentation with Submanifold Sparse Convolutional Networks`
+- `SubMConv2d` is `SSC` in the original paper `3D Semantic Segmentation with Submanifold Sparse Convolutional Networks`
+- `SparseConvTranspose2d` is the inverse operation of `SparseConv2d`. It is suggested not to use it since it will generate too much new points according to [https://github.com/traveller59/spconv/issues/149#issuecomment-639351324](https://github.com/traveller59/spconv/issues/149#issuecomment-639351324)
+- `SparseInverseConv2d`: use this for deconv! [https://github.com/traveller59/spconv/issues/18#issuecomment-463537246](https://github.com/traveller59/spconv/issues/18#issuecomment-463537246)
+
+### Understanding
+- For sparse convolution operation: [https://towardsdatascience.com/how-does-sparse-convolution-work-3257a0a8fd1](https://towardsdatascience.com/how-does-sparse-convolution-work-3257a0a8fd1)
+- `SparseInverseConv2d`: assume `SparseInverseConv2d` has the same `indice_key` as the previous `SparseConv2d` or `SubMConv2d` (both are ok). `indice_key` actually refers to some variables defining how each output pixel is related to the input kernel & input pixel. 
+e.g. in `SparseConv2d` or `SubMConv2d`, output `y[i]` is the weight average of input `x[j], j \in N(i)`, here `N(i)={j_1, j_2, ..., j_k}` such that `y[i] = \sum_{j \in N(i)} w_j * x[j]`. 
+Here `x[j]` themselves define the *active set* `A`, i.e. `x[j]` is active is equivalent to `j \in A`.
+Then in `SparseInverseConv2d`, output `x[j]` is the weight average of input `{y[i] | N(i) contains j}`. And this kind of weight average is computed only in the same active set position `A`, i.e. we only compute output in position `j \in A`. Therefore, the output has the same active set as the raw original input (i.e. recover the original sparse set)
+
+The understanding of deconv (3x3, stride=2) example is in: [https://www.zhihu.com/question/43609045/answer/145192432](https://www.zhihu.com/question/43609045/answer/145192432)
+
+## Original examples
 
 ### SparseConvTensor
 
@@ -111,51 +178,105 @@ class ExampleNet(nn.Module):
         return self.net(x)
 ```
 
-### Utility functions
 
-* convert point cloud to voxel
-
-```Python
-
-voxel_generator = spconv.utils.VoxelGenerator(
-    voxel_size=[0.1, 0.1, 0.1], 
-    point_cloud_range=[-50, -50, -3, 50, 50, 1],
-    max_num_points=30,
-    max_voxels=40000
-)
-
-points = # [N, 3+] tensor.
-voxels, coords, num_points_per_voxel = voxel_generator.generate(points)
+## FINAL MY EXAMPLE (basic tutorial of spconv)
 ```
+import spconv
+import numpy as np
+np.random.seed(123)
 
-## Implementation Details
+import torch
+import torch.nn as nn
 
-This implementation use gather-gemm-scatter framework to do sparse convolution.
+####### points to voxels
+anchor_center = np.random.rand(20, 3)
+voxel_size = 0.2
+voxel_generator = spconv.utils.VoxelGeneratorV2(voxel_size=[voxel_size] * 3,
+                                                point_cloud_range=[0, 0, 0, 1, 1, 1],
+                                                max_num_points=20,
+                                                max_voxels=800000)
+res = voxel_generator.generate(anchor_center)
 
-## Projects using spconv:
 
-* [second.pytorch](https://github.com/traveller59/second.pytorch): Point Cloud Object Detection in KITTI Dataset.
+####### voxel feature extractor: MeanVFE
+voxel_features = torch.sum(torch.FloatTensor(res['voxels']), dim=1)
+normalizer = torch.clamp_min(torch.FloatTensor(res['num_points_per_voxel']).view(-1, 1), min=1.0)
+features = voxel_features / normalizer
 
-## Authors
+####### create sparse tensor
+# class SparseConvTensor(object):
+#     def __init__(self, features, indices, spatial_shape, batch_size, grid=None):
+#         """
+#         Args:
+#             features: [num_points, num_features] feature tensor
+#             indices: [num_points, ndim + 1] indice tensor. batch index saved in indices[:, 0]
+#             spatial_shape: spatial shape of your sparse data
+#             batch_size: batch size of your sparse data
+#             grid: pre-allocated grid tensor. should be used when the volume of spatial shape is very large.
+#         """
 
-* **Yan Yan** - *Initial work* - [traveller59](https://github.com/traveller59)
+# remember to put to gpu: tocuda(): https://github.com/traveller59/spconv/issues/18#issuecomment-479809548
+indices = torch.cat([torch.zeros((res['coordinates'].shape[0], 1)).int(), torch.IntTensor(res['coordinates'])], axis=1) 
+spatial_shape = [int(1 / voxel_size)] * 3
+batch_size = 1
+x = spconv.SparseConvTensor(features, indices, spatial_shape, batch_size)
 
-* **Bo Li** - *gpu indice generation idea, owner of patent of the sparse conv gpu indice generation algorithm (don't include subm)* - [prclibo](https://github.com/prclibo)
+####### to dense
+# convert sparse tensor to dense NCHW tensor. The shape is: (B, C, Z, Y, X), 
+# B is batch size, C is feature channel, the order is zyx. We can directly use `indices` to access `features`
+# `x.dense()[indices[i, 0], :, indices[i, 1], indices[i, 2], indices[i, 3]]` is exactly `features[i]`
+# Note that `indices.shape[0] == features.shape[0]`
 
-## Third party libraries
+x_dense = x.dense() 
 
-* [CUDPP](https://github.com/cudpp/cudpp): A cuda library. contains a cuda hash implementation.
+print(x.sparity) # helper function to check sparity. 
 
-* [robin-map](https://github.com/Tessil/robin-map): A fast c++ hash library. almost 2x faster than std::unordered_map in this project.
+####### build sparse network
+# It is a common usage to set all bias=False in all sparse conv/deconv 
+#
+class Model(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.net = spconv.SparseSequential(
+            spconv.SubMConv3d(3, 3, 3, bias=False, indice_key="subm0"),
+            spconv.SparseConv3d(3, 3, 3, 2, bias=False, indice_key="spconv0"),
+            spconv.SparseInverseConv3d(3, 1, 3, bias=False, indice_key="spconv0"), # need provide kernel size to create weight
+        )
 
-* [pybind11](https://github.com/pybind/pybind11): A head-only python c++ binding library.
+    def forward(self, x):
+        return_list = []
+        for layer in self.net:
+            x = layer(x)
+            return_list.append(x)
+        return return_list
 
-* [prettyprint](https://github.com/louisdx/cxx-prettyprint): A head-only library for container print.
+net = Model()
+return_list = net(x)
 
-## License
 
-This project is licensed under the Apache license 2.0 License - see the [LICENSE.md](LICENSE.md) file for details
+####### visualize the intermediate layers for understanding the active sets
+#
+num_layers = len(return_list)
+spatial_size = int(1 / voxel_size)
+import matplotlib.pyplot as plt
+def rescale_img(img):
+    return (img - np.min(img)) / (np.max(img) - np.min(img))
+# for i in range(spatial_size):
+for i in range(2):
+    print(i)
+    plt.subplot(num_layers + 1, spatial_size, i + 1)
+    ximg = np.transpose(x.dense()[0][:, i, :, :].numpy(), [1, 2, 0])
+    plt.imshow(rescale_img(ximg))
+    plt.title('ximg')
 
-The [CUDPP](https://github.com/cudpp/cudpp) hash code is licensed under BSD License.
+    for lid in range(num_layers):
+        plt.subplot(num_layers + 1, spatial_size, i + 1 + spatial_size * (lid+1))
+        yimg = np.transpose(return_list[lid].dense()[0][:, i, :, :].detach().numpy(), [1, 2, 0])
+        plt.imshow(rescale_img(yimg))
+        plt.title(f'{lid}')
+        print(lid, yimg.shape)
 
-The [robin-map](https://github.com/Tessil/robin-map) code is licensed under MIT license.
+plt.show()
+
+
+```
